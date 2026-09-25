@@ -1,0 +1,35 @@
+# Maven
+target/
+**/target/
+
+# H2 database
+data/
+**/data/
+*.mv.db
+*.trace.db
+
+# Logs
+logs/
+*.log
+
+# LocalStack
+localstack/
+.localstack/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Java
+*.class
+
+# Environment files
+.env
+.env.*
+
+# Temporary files
+*.tmp
