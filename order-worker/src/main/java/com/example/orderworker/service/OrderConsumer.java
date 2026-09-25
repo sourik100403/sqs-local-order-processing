@@ -12,10 +12,14 @@ import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
 import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
+import com.example.orderworker.entity.Bill;
 
 import com.example.orderworker.entity.Order;
 import com.example.orderworker.model.OrderMessage;
 import com.example.orderworker.repository.OrderRepository;
+
+import com.example.orderworker.entity.Bill;
+import com.example.orderworker.service.BillService;
 
 @Service
 public class OrderConsumer {
@@ -23,6 +27,7 @@ public class OrderConsumer {
     private final SqsClient sqsClient;
     private final ObjectMapper objectMapper;
     private final OrderRepository orderRepository;
+    private final BillService billService;
 
     @Value("${aws.sqs.queue-url}")
     private String queueUrl;
@@ -30,11 +35,14 @@ public class OrderConsumer {
     public OrderConsumer(
             SqsClient sqsClient,
             ObjectMapper objectMapper,
-            OrderRepository orderRepository
+            OrderRepository orderRepository,
+            BillService billService
+            
     ) {
         this.sqsClient = sqsClient;
         this.objectMapper = objectMapper;
         this.orderRepository = orderRepository;
+        this.billService = billService;
     }
 
     @Scheduled(fixedDelay = 1000)
@@ -159,13 +167,24 @@ public class OrderConsumer {
         // 5. Mark order COMPLETED
         // ==========================================
 
-        order.setStatus("COMPLETED");
 
+
+        order.setStatus("COMPLETED");
         orderRepository.save(order);
 
-        System.out.println(
-                "Order completed successfully"
-        );
+System.out.println("Order completed successfully");
+
+// Generate bill
+Bill bill = billService.generateBill(order);
+
+System.out.println("================================");
+System.out.println("Bill generated successfully");
+System.out.println("Bill ID: " + bill.getBillId());
+System.out.println("Order ID: " + bill.getOrderId());
+System.out.println("Amount: " + bill.getAmount());
+System.out.println("Tax: " + bill.getTax());
+System.out.println("Total: " + bill.getTotalAmount());
+System.out.println("================================");
     }
 
     private void processPayment(Order order) {

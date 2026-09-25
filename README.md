@@ -1,18 +1,18 @@
-# SQS Local Order Processing Demo
+# SQS Local Order Processing System
 
-A hands-on **event-driven order processing system** built with **Spring Boot, Amazon SQS, LocalStack, H2 Database, Docker Compose, and k6**.
+A practical **event-driven order processing system** built with **Spring Boot, Amazon SQS, LocalStack, H2 Database, Docker Compose, and k6**.
 
-This project demonstrates how an application can use a message queue to decouple an order-producing API from an asynchronous order-processing worker.
+This project demonstrates asynchronous order processing where an Order API sends orders to an SQS queue, a Worker processes the order, completes payment processing, generates a bill, saves the order and bill into an H2 database, and finally deletes the successfully processed SQS message.
 
 ---
 
-## Architecture
+# Architecture
 
 ```text
                          Client / k6
-                             |
-                             | HTTP POST
-                             v
+                              |
+                              | HTTP POST
+                              v
                     +-------------------+
                     |    Order API      |
                     |   Spring Boot     |
@@ -27,7 +27,7 @@ This project demonstrates how an application can use a message queue to decouple
                     |     :4566         |
                     +---------+---------+
                               |
-                              | Receive Message
+                              | Poll / Receive
                               v
                     +-------------------+
                     |   Order Worker    |
@@ -35,43 +35,71 @@ This project demonstrates how an application can use a message queue to decouple
                     |      :8081        |
                     +---------+---------+
                               |
+                              v
+                    +-------------------+
+                    |  Order Processing |
+                    +---------+---------+
+                              |
+                       Payment Success
+                              |
+                              v
+                    +-------------------+
+                    | Order = COMPLETED |
+                    +---------+---------+
+                              |
+                              v
+                    +-------------------+
+                    |   Bill Service    |
+                    | Generate Bill     |
+                    +---------+---------+
+                              |
                     +---------+---------+
                     |                   |
                     v                   v
-             +-------------+     +-------------+
-             |    H2 DB    |     |   Payment   |
-             | File-based  |     | Processing  |
-             +-------------+     +-------------+
+              +-------------+    +-------------+
+              |   ORDERS    |    |    BILLS    |
+              |     H2      |    |     H2      |
+              +-------------+    +-------------+
+                              |
+                              v
+                    Delete SQS Message
 ```
 
 ---
 
-## Project Overview
+# Project Overview
 
-The application contains two Spring Boot services:
+The system contains two Spring Boot applications.
 
-### 1. Order API
+## 1. Order API
 
-The Order API accepts HTTP requests from clients and sends order information to an SQS queue.
+The Order API receives order requests from clients.
 
 ```text
 Client
   |
+  | POST /api/orders
   v
-POST /api/orders
+Order API :8080
   |
-  v
-Order API
-  |
+  | SendMessage
   v
 SQS
 ```
 
-The API does not wait for the complete order processing workflow.
+The API returns after successfully sending the order message to SQS.
 
-It returns a response after successfully sending the message to SQS.
+It does not wait for:
 
-### 2. Order Worker
+- Payment processing
+- Bill generation
+- Database completion
+
+This makes the API asynchronous from the business-processing perspective.
+
+---
+
+# 2. Order Worker
 
 The Order Worker continuously polls the SQS queue.
 
@@ -81,35 +109,148 @@ SQS
  v
 Order Worker
  |
- +--> Save order
+ +--> Read order
+ |
+ +--> Save order as PROCESSING
  |
  +--> Process payment
  |
- +--> Update status
+ +--> Update order to COMPLETED
+ |
+ +--> Generate bill
+ |
+ +--> Save bill to H2
  |
  +--> Delete SQS message
 ```
 
-The worker processes orders asynchronously.
+The Worker runs on:
+
+```text
+http://localhost:8081
+```
 
 ---
 
-# Technologies Used
+# Complete Order Flow
+
+When a client creates an order:
+
+```text
+1. Client
+      |
+      v
+2. POST /api/orders
+      |
+      v
+3. Order API
+      |
+      v
+4. Send message to SQS
+      |
+      v
+5. SQS order-queue
+      |
+      v
+6. Order Worker receives message
+      |
+      v
+7. Save order as PROCESSING
+      |
+      v
+8. Process payment
+      |
+      v
+9. Payment successful
+      |
+      v
+10. Update order = COMPLETED
+      |
+      v
+11. Generate bill
+      |
+      v
+12. Save bill to H2
+      |
+      v
+13. Delete SQS message
+```
+
+---
+
+# Example
+
+Client sends:
+
+```json
+{
+  "orderId": "ORD-3001",
+  "product": "Sony ZV-E10",
+  "amount": 65000
+}
+```
+
+The API sends this order to SQS.
+
+The Worker processes the order.
+
+After successful processing:
+
+```text
+Order:
+ORD-3001
+Product:
+Sony ZV-E10
+Amount:
+65000
+Status:
+COMPLETED
+```
+
+The Bill Service generates a bill.
+
+Example:
+
+```text
+Bill ID:
+BILL-xxxxxxxx
+
+Order ID:
+ORD-3001
+
+Amount:
+65000
+
+Tax:
+11700
+
+Total:
+76700
+
+Status:
+GENERATED
+```
+
+Both the order and bill are stored in H2.
+
+---
+
+# Technologies
 
 | Technology | Purpose |
 |---|---|
 | Java 24 | Programming language |
 | Spring Boot 3.5.3 | Application framework |
-| Spring Data JPA | Database access |
-| H2 Database | Local database |
+| Spring Data JPA | Database persistence |
+| H2 | Local database |
 | Amazon SQS | Message queue |
-| LocalStack | Local AWS service simulation |
+| LocalStack | Local AWS simulation |
 | AWS SDK for Java | SQS integration |
-| Docker | Containerization |
+| Docker | Container runtime |
 | Docker Compose | Local infrastructure |
 | Maven | Build tool |
 | k6 | Load testing |
-| Bash | Startup automation |
+| Bash | Automation |
 
 ---
 
@@ -118,6 +259,8 @@ The worker processes orders asynchronously.
 ```text
 sqs-local-demo/
 │
+├── README.md
+├── .gitignore
 ├── docker-compose.yml
 ├── start-all.sh
 ├── load-test.js
@@ -126,6 +269,8 @@ sqs-local-demo/
 │   ├── order-api.log
 │   └── order-worker.log
 │
+├── localstack/
+│
 ├── order-api/
 │   ├── pom.xml
 │   └── src/
@@ -133,157 +278,72 @@ sqs-local-demo/
 │           ├── java/
 │           └── resources/
 │
-├── order-worker/
-│   ├── pom.xml
-│   ├── data/
-│   │   └── orderdb.mv.db
-│   └── src/
-│       └── main/
-│           ├── java/
-│           └── resources/
-│
-└── localstack/
+└── order-worker/
+    ├── pom.xml
+    ├── data/
+    │   └── orderdb.mv.db
+    └── src/
+        └── main/
+            ├── java/
+            └── resources/
 ```
+
+> `target/`, logs, local H2 data, and local environment files should be excluded through `.gitignore`.
 
 ---
 
-# Architecture Flow
+# Order API
 
-When an order is created:
+The API exposes:
 
 ```text
-1. Client sends HTTP request
-             |
-             v
-2. Order API receives request
-             |
-             v
-3. API creates SQS message
-             |
-             v
-4. Message enters order-queue
-             |
-             v
-5. Worker polls SQS
-             |
-             v
-6. Worker reads order
-             |
-             v
-7. Order saved as PROCESSING
-             |
-             v
-8. Payment processing
-             |
-             v
-9. Order updated to COMPLETED
-             |
-             v
-10. SQS message deleted
-```
-
----
-
-# Prerequisites
-
-Install the following:
-
-### Java
-
-```bash
-java -version
-```
-
-### Maven
-
-```bash
-mvn -version
-```
-
-### Docker
-
-```bash
-docker --version
-```
-
-### Docker Compose
-
-```bash
-docker compose version
-```
-
-### AWS CLI
-
-```bash
-aws --version
-```
-
-### k6
-
-```bash
-brew install k6
-```
-
-Verify:
-
-```bash
-k6 version
-```
-
----
-
-# Clone the Repository
-
-```bash
-git clone <YOUR_GITHUB_REPOSITORY_URL>
+POST /api/orders
 ```
 
 Example:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/sqs-local-demo.git
+curl -X POST http://localhost:8080/api/orders \
+  -H "Content-Type: application/json" \
+  -d '{
+    "orderId":"ORD-3001",
+    "product":"Sony ZV-E10",
+    "amount":65000
+  }'
 ```
 
-Go to the project:
+Example response:
 
-```bash
-cd sqs-local-demo
+```json
+{
+  "messageId": "d1269a52-557a-45b3-81f8-9e22bc0e209c",
+  "status": "Order sent to SQS"
+}
 ```
+
+The `messageId` is the SQS message identifier.
 
 ---
 
-# Start the Application
+# LocalStack
 
-The project includes a startup script that starts LocalStack, creates/checks the SQS queue, and starts both Spring Boot applications.
+LocalStack provides a local AWS environment for development.
 
-Make the script executable:
-
-```bash
-chmod +x start-all.sh
-```
-
-Run:
-
-```bash
-./start-all.sh
-```
-
-The script starts:
+Currently the project uses LocalStack only for SQS.
 
 ```text
-LocalStack       → 4566
-Order API        → 8080
-Order Worker     → 8081
-SQS Queue        → order-queue
+LocalStack
+    |
+    +--- SQS
 ```
 
----
+LocalStack runs on:
 
-# LocalStack Configuration
+```text
+http://localhost:4566
+```
 
-LocalStack is configured through Docker Compose.
-
-Example:
+Docker Compose configuration:
 
 ```yaml
 services:
@@ -300,20 +360,13 @@ services:
       - "/var/run/docker.sock:/var/run/docker.sock"
 ```
 
-LocalStack endpoint:
-
-```text
-http://localhost:4566
-```
-
 ---
 
-# SQS Configuration
+# SQS Queue
 
-The application uses:
+Queue name:
 
 ```text
-Queue Name:
 order-queue
 ```
 
@@ -323,7 +376,7 @@ Queue URL:
 http://localhost:4566/000000000000/order-queue
 ```
 
-For local development, dummy AWS credentials are used:
+For local development, dummy credentials are used:
 
 ```bash
 export AWS_ACCESS_KEY_ID=test
@@ -331,9 +384,11 @@ export AWS_SECRET_ACCESS_KEY=test
 export AWS_DEFAULT_REGION=ap-south-1
 ```
 
+These credentials are for LocalStack only and are not real AWS credentials.
+
 ---
 
-# Check SQS Queue
+# Check SQS
 
 List queues:
 
@@ -343,110 +398,122 @@ aws --endpoint-url=http://localhost:4566 \
   --region ap-south-1
 ```
 
-Expected:
-
-```text
-http://localhost:4566/000000000000/order-queue
-```
-
----
-
-# Create an Order
-
-Use the Order API:
+Check queue depth:
 
 ```bash
-curl -X POST http://localhost:8080/api/orders \
-  -H "Content-Type: application/json" \
-  -d '{
-    "orderId": "ORD-2001",
-    "product": "Sony ZV-E10",
-    "amount": 65000
-  }'
+aws --endpoint-url=http://localhost:4566 \
+  sqs get-queue-attributes \
+  --queue-url http://localhost:4566/000000000000/order-queue \
+  --attribute-names ApproximateNumberOfMessages \
+  --region ap-south-1
 ```
 
-Example response:
+Example:
 
 ```json
 {
-  "messageId": "ea5755c0-047d-48e6-88e7-25d34c196bcc",
-  "status": "Order sent to SQS"
+  "Attributes": {
+    "ApproximateNumberOfMessages": "0"
+  }
 }
 ```
-
-The important point is that the API returns after sending the message to SQS.
 
 ---
 
-# Order Processing
+# Order Worker
 
-The worker receives the message:
+The Worker uses Spring Scheduling to poll SQS.
 
-```json
-{
-  "orderId": "ORD-2001",
-  "product": "Sony ZV-E10",
-  "amount": 65000
-}
+The Worker:
+
+1. Receives messages
+2. Converts JSON into an order object
+3. Saves the order
+4. Processes payment
+5. Updates order status
+6. Generates a bill
+7. Saves the bill
+8. Deletes the SQS message
+
+---
+
+# Payment Processing
+
+The current application contains simulated payment processing.
+
+Example:
+
+```java
+Thread.sleep(500);
 ```
 
-The worker then:
+This is intentionally used to simulate a payment-processing delay for performance testing.
+
+In a real application, this would be replaced by a payment service or payment gateway integration.
+
+---
+
+# Bill Generation
+
+After payment succeeds:
 
 ```text
-Receive message
-      |
-      v
-Deserialize JSON
-      |
-      v
-Create Order
-      |
-      v
-Save PROCESSING
-      |
-      v
-Process payment
-      |
-      v
-Update COMPLETED
-      |
-      v
-Delete SQS message
+Payment Successful
+       |
+       v
+Order = COMPLETED
+       |
+       v
+BillService
+       |
+       +--> Generate Bill ID
+       |
+       +--> Calculate Tax
+       |
+       +--> Calculate Total
+       |
+       +--> Save Bill
 ```
+
+The current example uses an 18% tax calculation:
+
+```text
+Tax = Amount × 18%
+```
+
+For an order worth:
+
+```text
+65000
+```
+
+the example bill becomes:
+
+```text
+Amount = 65000
+Tax = 11700
+Total = 76700
+```
+
+This tax calculation is only a demo and should be replaced by actual business/tax rules in a production system.
 
 ---
 
-# Worker Logs
+# Database
 
-View worker logs:
+The project uses a file-based H2 database.
 
-```bash
-tail -f ~/Desktop/sqs-local-demo/logs/order-worker.log
-```
-
-Search for order processing:
-
-```bash
-grep -nE "Received SQS|Order ID|Order saved|Payment successful|Order completed|SQS message deleted|Failed to process" \
-logs/order-worker.log
-```
-
----
-
-# Order API Logs
-
-```bash
-tail -f logs/order-api.log
-```
-
----
-
-# H2 Database
-
-The worker uses a file-based H2 database:
+Configuration:
 
 ```properties
 spring.datasource.url=jdbc:h2:file:./data/orderdb
+spring.datasource.driver-class-name=org.h2.Driver
+spring.datasource.username=sa
+spring.datasource.password=
+
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.format_sql=true
 ```
 
 Database location:
@@ -455,11 +522,34 @@ Database location:
 order-worker/data/orderdb.mv.db
 ```
 
-Database credentials:
+---
+
+# Database Tables
+
+## ORDERS
+
+The order table stores the order-processing information.
+
+Example:
 
 ```text
-Username: sa
-Password: empty
+ID | ORDER_ID  | PRODUCT      | AMOUNT | STATUS
+------------------------------------------------
+1  | ORD-3001  | Sony ZV-E10  | 65000  | COMPLETED
+```
+
+---
+
+## BILLS
+
+The bill table stores generated billing information.
+
+Example:
+
+```text
+ID | BILL_ID   | ORDER_ID  | PRODUCT      | AMOUNT | TAX   | TOTAL | STATUS
+-----------------------------------------------------------------------------
+1  | BILL-xxx  | ORD-3001  | Sony ZV-E10  | 65000  | 11700 | 76700 | GENERATED
 ```
 
 ---
@@ -481,7 +571,7 @@ Open:
 http://localhost:8081/h2-console
 ```
 
-Use:
+Login details:
 
 ```text
 JDBC URL:
@@ -494,51 +584,148 @@ Password:
 leave empty
 ```
 
-Then query:
+Click **Connect**.
+
+---
+
+# Verify Orders
+
+Run:
 
 ```sql
 SELECT * FROM ORDERS;
 ```
 
-Example result:
+---
 
-```text
-ID | ORDER_ID  | PRODUCT      | AMOUNT | STATUS
--------------------------------------------------
-1  | ORD-2001  | Sony ZV-E10  | 65000  | COMPLETED
+# Verify Bills
+
+Run:
+
+```sql
+SELECT * FROM BILLS;
 ```
 
 ---
 
-# Check SQS Queue Depth
+# Verify Complete Flow
 
-To see how many messages are waiting:
+After sending an order:
 
 ```bash
-aws --endpoint-url=http://localhost:4566 \
-  sqs get-queue-attributes \
-  --queue-url http://localhost:4566/000000000000/order-queue \
-  --attribute-names ApproximateNumberOfMessages \
-  --region ap-south-1
+curl -X POST http://localhost:8080/api/orders \
+  -H "Content-Type: application/json" \
+  -d '{"orderId":"ORD-TEST-001","product":"Sony ZV-E10","amount":65000}'
 ```
 
-Example:
+Check worker logs:
 
-```json
-{
-  "Attributes": {
-    "ApproximateNumberOfMessages": "0"
-  }
-}
+```bash
+grep -nE "Received SQS|Order ID|Payment successful|Order completed|Bill generated|SQS message deleted|Failed to process" \
+logs/order-worker.log
 ```
 
-A value of `0` means there are approximately no messages currently waiting in the queue.
+Expected flow:
+
+```text
+Received SQS message
+Order ID: ORD-TEST-001
+Payment successful
+Order completed successfully
+Bill generated successfully
+SQS message deleted
+```
+
+Then verify the database:
+
+```sql
+SELECT * FROM ORDERS;
+
+SELECT * FROM BILLS;
+```
 
 ---
 
-# Load Testing with k6
+# Start the Entire Application
 
-The project includes a `load-test.js` file.
+The project provides:
+
+```text
+start-all.sh
+```
+
+Make it executable:
+
+```bash
+chmod +x start-all.sh
+```
+
+Start everything:
+
+```bash
+./start-all.sh
+```
+
+The script:
+
+```text
+1. Starts LocalStack
+2. Checks/creates SQS queue
+3. Checks application ports
+4. Starts Order Worker
+5. Starts Order API
+```
+
+---
+
+# Service Ports
+
+| Service | Port |
+|---|---:|
+| Order API | 8080 |
+| Order Worker | 8081 |
+| LocalStack | 4566 |
+| H2 Console | 8081/h2-console |
+
+---
+
+# Logs
+
+Order API:
+
+```bash
+tail -f logs/order-api.log
+```
+
+Order Worker:
+
+```bash
+tail -f logs/order-worker.log
+```
+
+---
+
+# Load Testing
+
+The project uses **k6** to test API performance.
+
+Install k6 on macOS:
+
+```bash
+brew install k6
+```
+
+Verify:
+
+```bash
+k6 version
+```
+
+Run the load test:
+
+```bash
+k6 run load-test.js
+```
 
 The load test generates random:
 
@@ -546,69 +733,33 @@ The load test generates random:
 - Product
 - Amount
 
-Example generated request:
+Example:
 
 ```json
 {
-  "orderId": "ORD-1727312345-25-1042-A8K92P",
+  "orderId": "ORD-123456-AB12",
   "product": "Sony ZV-E10",
   "amount": 67342
 }
 ```
 
-Another request might contain:
-
-```json
-{
-  "orderId": "ORD-1727312346-31-1043-X7P21M",
-  "product": "MacBook Air M3",
-  "amount": 92451
-}
-```
-
 ---
 
-# Load Test Progression
+# Load Testing Strategy
 
-It is recommended to increase the load gradually.
+Load should be increased gradually:
 
 ```text
 100 requests/sec
-       ↓
+       |
+       v
 1,000 requests/sec
-       ↓
+       |
+       v
 10,000 requests/sec
 ```
 
-Start with:
-
-```javascript
-rate: 100
-```
-
-Then:
-
-```javascript
-rate: 1000
-```
-
-Finally:
-
-```javascript
-rate: 10000
-```
-
-Run:
-
-```bash
-k6 run load-test.js
-```
-
----
-
-# 10,000 Requests/Second Test
-
-The target test is:
+The target experiment is:
 
 ```text
 10,000 requests/sec
@@ -625,81 +776,59 @@ Approximately:
 ```text
 10,000 × 30
 =
-300,000 HTTP requests
+300,000 requests
 ```
 
-This is a local performance experiment and should not be interpreted as the maximum capacity of AWS SQS.
-
-The local system includes:
-
-```text
-Mac
-Spring Boot
-LocalStack
-Docker
-H2
-JVM
-```
-
-Any of these can become the bottleneck.
+The load test measures the behavior of the **local development environment**, not the maximum capacity of AWS SQS.
 
 ---
 
-# Important Performance Observation
+# Performance Bottleneck
 
-The current worker intentionally contains simulated payment processing:
+The current Worker intentionally contains:
 
 ```java
 Thread.sleep(500);
 ```
 
-Therefore one processing thread can process approximately:
+to simulate payment processing.
+
+With one processing thread, this is approximately:
 
 ```text
-1 / 0.5
-=
 2 orders/sec
 ```
 
-while the producer can potentially generate thousands of requests per second.
+while the producer can send significantly more requests.
 
 For example:
 
 ```text
-Producer:
+Producer
 10,000 orders/sec
 
-Worker:
+        ↓
+
+SQS Queue
+████████████████████████
+
+        ↓
+
+Worker
 ~2 orders/sec
 ```
 
-This causes the SQS backlog to increase.
+The queue therefore becomes a buffer between the producer and consumer.
 
-Conceptually:
+This demonstrates an important distributed-system concept:
 
-```text
-             10,000/sec
-                 |
-                 v
-          +--------------+
-          |     SQS      |
-          |    Queue     |
-          | ████████████ |
-          | ████████████ |
-          +------+-------+
-                 |
-                 | ~2/sec
-                 v
-              Worker
-```
-
-This demonstrates why asynchronous systems often require **horizontal consumer scaling**.
+> Producer throughput and consumer throughput do not have to be the same.
 
 ---
 
-# Monitoring During Load Testing
+# Monitor Queue Backlog
 
-Monitor SQS:
+Run:
 
 ```bash
 while true; do
@@ -713,13 +842,17 @@ while true; do
 done
 ```
 
-Monitor Docker:
+---
+
+# Monitor Docker
 
 ```bash
 docker stats
 ```
 
-Monitor processes:
+---
+
+# Monitor CPU
 
 ```bash
 top -o cpu
@@ -727,48 +860,220 @@ top -o cpu
 
 ---
 
-# Current Limitations
+# Error Handling
 
-This project is currently designed as a **local learning and experimentation environment**.
+The Worker follows an important rule:
 
-Current limitations include:
+```text
+Successful processing
+        |
+        v
+Delete SQS message
+```
 
-- Single local Order Worker
-- H2 instead of production database
-- LocalStack instead of AWS SQS
-- Simulated payment processing
-- No Dead Letter Queue yet
-- No production monitoring yet
-- No automatic worker scaling yet
-- Limited concurrency
-- No production-grade distributed tracing
-- No complete idempotency implementation yet
+If processing fails:
+
+```text
+Processing failure
+        |
+        v
+Do NOT delete message
+```
+
+This allows the message to become available for retry according to SQS visibility-timeout behavior.
+
+---
+
+# Idempotency
+
+The Bill Service checks whether a bill already exists for an order before creating another bill.
+
+Conceptually:
+
+```text
+SQS Message
+     |
+     v
+Order ORD-3001
+     |
+     v
+Does bill already exist?
+     |
+   +---+---+
+   |       |
+  Yes      No
+   |       |
+   v       v
+Return   Generate
+existing  new bill
+bill
+```
+
+This helps prevent duplicate bill generation when the same SQS message is delivered more than once.
+
+---
+
+# Current Architecture
+
+```text
+                    Client
+                      |
+                      v
+                Order API :8080
+                      |
+                      | SendMessage
+                      v
+                LocalStack :4566
+                      |
+                      v
+                  SQS Queue
+                      |
+                      | Poll
+                      v
+              Order Worker :8081
+                      |
+              +-------+--------+
+              |                |
+              v                v
+        Order Processing   Payment
+              |                |
+              +-------+--------+
+                      |
+                      v
+              Order COMPLETED
+                      |
+                      v
+                Bill Service
+                      |
+              +-------+-------+
+              |               |
+              v               v
+          ORDERS H2       BILLS H2
+                      |
+                      v
+               Delete SQS Message
+```
+
+---
+
+# Future Notification System
+
+The next planned feature is a notification system.
+
+After successful order completion and bill generation:
+
+```text
+Order Completed
+      |
+      v
+Bill Generated
+      |
+      v
+Notification Event
+      |
+      +------------+------------+
+      |            |            |
+      v            v            v
+    Email         SMS        Push
+```
+
+The notification system can later be separated into its own service and queue.
+
+A future architecture could be:
+
+```text
+                 Order API
+                     |
+                     v
+                  SQS
+                     |
+                     v
+               Order Worker
+                     |
+          +----------+----------+
+          |                     |
+          v                     v
+       Database             Bill Service
+                                  |
+                                  v
+                         Notification Queue
+                                  |
+                   +--------------+--------------+
+                   |              |              |
+                   v              v              v
+                Email            SMS          Push
+```
+
+This keeps notification processing independent from the main order-processing workflow.
+
+---
+
+# Future Production AWS Architecture
+
+The local implementation can later be migrated to AWS.
+
+```text
+                         Internet
+                            |
+                            v
+                           ALB
+                            |
+                +-----------+-----------+
+                |                       |
+                v                       v
+             API #1                  API #2
+                |                       |
+                +-----------+-----------+
+                            |
+                            v
+                        AWS SQS
+                            |
+              +-------------+-------------+
+              |             |             |
+              v             v             v
+           Worker #1     Worker #2     Worker #3
+              |             |             |
+              +-------------+-------------+
+                            |
+                            v
+                           RDS
+```
+
+Additional production components can include:
+
+```text
+CloudWatch
+Auto Scaling
+Dead Letter Queue
+RDS
+ECS / EKS / EC2
+ALB
+IAM
+Secrets Manager
+```
 
 ---
 
 # Planned Improvements
 
-The next stages of the project are:
+## 1. Concurrent Workers
 
-## 1. Concurrent SQS Consumers
-
-Increase worker concurrency:
+Increase the number of messages processed concurrently.
 
 ```text
-             SQS
-              |
-       +------+------+------+
-       |      |      |      |
-       v      v      v      v
-    Worker  Worker Worker Worker
-       1      2      3      4
+                    SQS
+                     |
+        +------------+------------+
+        |            |            |
+        v            v            v
+     Worker 1     Worker 2     Worker 3
 ```
 
 ---
 
 ## 2. Batch Processing
 
-Receive multiple messages:
+Receive multiple SQS messages at once.
 
 ```text
 ReceiveMessage
@@ -780,273 +1085,131 @@ ReceiveMessage
       +-- Message 10
 ```
 
-This can improve throughput.
-
 ---
 
 ## 3. Batch Delete
 
-Instead of deleting messages individually:
-
-```text
-DeleteMessage
-DeleteMessage
-DeleteMessage
-...
-```
-
-use batch deletion where appropriate.
+Use batch deletion where appropriate instead of deleting every message individually.
 
 ---
 
-## 4. Idempotency
+## 4. Dead Letter Queue
 
-SQS Standard can deliver duplicate messages.
-
-The application should therefore safely handle:
+Failed messages can eventually move to a DLQ after a configured number of retries.
 
 ```text
-ORD-2001
-ORD-2001
-```
-
-without creating duplicate orders.
-
-The `orderId` can be used as an idempotency key.
-
----
-
-## 5. Dead Letter Queue
-
-Failed messages should eventually be moved to a DLQ:
-
-```text
-                SQS
-                 |
-                 v
-             Processing
-                 |
-          +------+------+
-          |             |
-       Success        Failure
-          |             |
-          v             v
-       Delete          Retry
-                        |
-                   Max retries
-                        |
-                        v
-                       DLQ
+SQS
+ |
+ v
+Worker
+ |
+ +---- Success ---> Delete
+ |
+ +---- Failure ---> Retry
+                       |
+                       v
+                    Max Retry
+                       |
+                       v
+                      DLQ
 ```
 
 ---
 
-## 6. Production AWS Architecture
+## 5. Monitoring
 
-The local architecture can eventually be migrated to AWS:
+Add production metrics for:
 
-```text
-                    Internet
-                       |
-                       v
-                      ALB
-                       |
-             +---------+---------+
-             |                   |
-             v                   v
-         API Instance       API Instance
-             |                   |
-             +---------+---------+
-                       |
-                       v
-                   AWS SQS
-                       |
-             +---------+---------+
-             |         |         |
-             v         v         v
-          Worker    Worker    Worker
-             |         |         |
-             +---------+---------+
-                       |
-                       v
-                      RDS
-```
-
-Monitoring can be added with:
-
-```text
-CloudWatch
-```
-
-for:
-
+- API requests/sec
 - API latency
-- API errors
-- CPU
-- Memory
+- HTTP errors
 - SQS queue depth
 - Worker throughput
-- Failed messages
+- Processing failures
+- Bill generation failures
 - DLQ messages
+- CPU
+- Memory
 
 ---
 
-# Key Concepts Learned
+## 6. Notification Service
+
+Add asynchronous:
+
+- Email notifications
+- SMS notifications
+- Push notifications
+
+without blocking the order-processing workflow.
+
+---
+
+# Key Concepts Demonstrated
 
 This project demonstrates:
 
-### REST API
-
-```text
-Client → Spring Boot
-```
-
-### Message Queue
-
-```text
-Producer → SQS → Consumer
-```
-
-### Asynchronous Processing
-
-```text
-API → SQS
-      |
-      +---- Worker processes later
-```
-
-### Decoupling
-
-The API and worker can scale independently.
-
-### Backpressure
-
-When producers are faster than consumers:
-
-```text
-Incoming rate > Processing rate
-```
-
-the queue grows.
-
-### Horizontal Scaling
-
-More workers can process more messages concurrently.
-
-### Reliability
-
-Messages can be retried when processing fails.
-
-### Idempotency
-
-Duplicate messages should not create duplicate business operations.
-
-### Load Testing
-
-k6 can generate controlled traffic to measure system behavior.
+- Spring Boot REST API
+- Amazon SQS concepts
+- LocalStack
+- Event-driven architecture
+- Asynchronous processing
+- Producer/consumer architecture
+- Message acknowledgement
+- SQS retries
+- Idempotency
+- Database persistence
+- JPA/Hibernate
+- H2 database
+- Bill generation
+- Docker
+- Docker Compose
+- Bash automation
+- k6 load testing
+- Queue backlog
+- Horizontal scaling concepts
+- Distributed-system design
 
 ---
 
-# Useful Commands
+# Learning Architecture
 
-### Start everything
+The main concept of the project is:
 
-```bash
-./start-all.sh
+```text
+             FAST API
+                |
+                v
+             SQS QUEUE
+                |
+                v
+        ASYNCHRONOUS WORKER
+                |
+        +-------+-------+
+        |               |
+        v               v
+     ORDER           PAYMENT
+        |               |
+        +-------+-------+
+                |
+                v
+          ORDER COMPLETED
+                |
+                v
+           BILL SERVICE
+                |
+                v
+          H2 DATABASE
+                |
+                v
+        DELETE SQS MESSAGE
 ```
 
-### Check Docker
-
-```bash
-docker ps
-```
-
-### Check SQS
-
-```bash
-aws --endpoint-url=http://localhost:4566 \
-  sqs list-queues \
-  --region ap-south-1
-```
-
-### Check queue depth
-
-```bash
-aws --endpoint-url=http://localhost:4566 \
-  sqs get-queue-attributes \
-  --queue-url http://localhost:4566/000000000000/order-queue \
-  --attribute-names ApproximateNumberOfMessages \
-  --region ap-south-1
-```
-
-### API logs
-
-```bash
-tail -f logs/order-api.log
-```
-
-### Worker logs
-
-```bash
-tail -f logs/order-worker.log
-```
-
-### Docker resource usage
-
-```bash
-docker stats
-```
-
-### Run load test
-
-```bash
-k6 run load-test.js
-```
+The project starts as a local implementation and is designed to evolve toward a production AWS event-driven architecture.
 
 ---
 
-# Learning Outcome
-
-This project demonstrates how to build an **asynchronous, event-driven order processing system** locally and provides a foundation for understanding how the same architecture can be deployed using AWS services.
-
-The main architectural principle is:
-
-```text
-                FAST PRODUCER
-                     |
-                     v
-                  AWS SQS
-                     |
-                     v
-              SCALABLE CONSUMERS
-                     |
-                     v
-                 DATABASE
-```
-
-The local implementation provides a practical foundation for progressing toward a production AWS architecture using:
-
-```text
-ALB
- +
-Spring Boot
- +
-AWS SQS
- +
-ECS / EKS / EC2
- +
-RDS
- +
-CloudWatch
- +
-Auto Scaling
- +
-DLQ
-```
-
----
-
-## Author
+# Author
 
 **Sourik Parui**
 
@@ -1061,3 +1224,4 @@ Learning and building practical projects around:
 - Event-Driven Architecture
 - Cloud Infrastructure
 - Performance Testing
+- System Design
