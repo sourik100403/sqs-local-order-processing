@@ -12,6 +12,10 @@ function randomString(length) {
     return result;
 }
 
+function randomPhone() {
+    return '9' + Math.floor(100000000 + Math.random() * 900000000);
+}
+
 const products = [
     'Sony ZV-E10',
     'Sony A6400',
@@ -30,18 +34,14 @@ export const options = {
         orders: {
             executor: 'constant-arrival-rate',
 
-            // 10,000 requests every second
             rate: 50,
 
             timeUnit: '1s',
 
-            // Run for 30 seconds
             duration: '30s',
 
-            // Start with 500 virtual users
             preAllocatedVUs: 500,
 
-            // Maximum users k6 can create
             maxVUs: 5000,
         },
     },
@@ -54,19 +54,44 @@ export const options = {
 
 export default function () {
 
+    const randomId = randomString(8);
+
     const product =
         products[Math.floor(Math.random() * products.length)];
 
     const orderId =
-        `ORD-${Date.now()}-${__VU}-${__ITER}-${randomString(6)}`;
+        `ORD-${Date.now()}-${__VU}-${__ITER}-${randomId}`;
 
     const amount =
         Math.floor(Math.random() * 100000) + 1000;
 
+    const customerName =
+        `Customer-${randomString(6)}`;
+
+    const phone =
+        randomPhone();
+
+    const email =
+        `customer-${randomString(8).toLowerCase()}@example.com`;
+
+    const whatsapp =
+        phone;
+
     const payload = JSON.stringify({
+
         orderId: orderId,
+
         product: product,
-        amount: amount
+
+        amount: amount,
+
+        customerName: customerName,
+
+        email: email,
+
+        phone: phone,
+
+        whatsapp: whatsapp
     });
 
     const params = {

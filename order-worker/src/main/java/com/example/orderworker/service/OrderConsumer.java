@@ -12,6 +12,8 @@ import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
 import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
+import com.example.orderworker.model.NotificationEvent;
+
 import com.example.orderworker.entity.Bill;
 
 import com.example.orderworker.entity.Order;
@@ -21,6 +23,8 @@ import com.example.orderworker.repository.OrderRepository;
 import com.example.orderworker.entity.Bill;
 import com.example.orderworker.service.BillService;
 
+import com.example.orderworker.model.NotificationEvent;
+
 @Service
 public class OrderConsumer {
 
@@ -28,6 +32,7 @@ public class OrderConsumer {
     private final ObjectMapper objectMapper;
     private final OrderRepository orderRepository;
     private final BillService billService;
+    private final NotificationProducer notificationProducer;
 
     @Value("${aws.sqs.queue-url}")
     private String queueUrl;
@@ -36,13 +41,15 @@ public class OrderConsumer {
             SqsClient sqsClient,
             ObjectMapper objectMapper,
             OrderRepository orderRepository,
-            BillService billService
+            BillService billService,
+            NotificationProducer notificationProducer
             
     ) {
         this.sqsClient = sqsClient;
         this.objectMapper = objectMapper;
         this.orderRepository = orderRepository;
         this.billService = billService;
+        this.notificationProducer = notificationProducer;
     }
 
     @Scheduled(fixedDelay = 1000)
@@ -131,21 +138,18 @@ public class OrderConsumer {
         // 2. Create database entity
         // ==========================================
 
-        Order order = new Order();
+Order order = new Order();
 
-        order.setOrderId(
-                orderMessage.getOrderId()
-        );
+order.setOrderId(orderMessage.getOrderId());
+order.setProduct(orderMessage.getProduct());
+order.setAmount(orderMessage.getAmount());
 
-        order.setProduct(
-                orderMessage.getProduct()
-        );
+order.setCustomerName(orderMessage.getCustomerName());
+order.setEmail(orderMessage.getEmail());
+order.setPhone(orderMessage.getPhone());
+order.setWhatsapp(orderMessage.getWhatsapp());
 
-        order.setAmount(
-                orderMessage.getAmount()
-        );
-
-        order.setStatus("PROCESSING");
+order.setStatus("PROCESSING");
 
         // ==========================================
         // 3. Save order
@@ -185,6 +189,26 @@ System.out.println("Amount: " + bill.getAmount());
 System.out.println("Tax: " + bill.getTax());
 System.out.println("Total: " + bill.getTotalAmount());
 System.out.println("================================");
+NotificationEvent event = new NotificationEvent();
+
+event.setEventType("ORDER_COMPLETED");
+
+event.setOrderId(order.getOrderId());
+event.setBillId(bill.getBillId());
+
+event.setCustomerName(order.getCustomerName());
+event.setEmail(order.getEmail());
+event.setPhone(order.getPhone());
+event.setWhatsapp(order.getWhatsapp());
+
+event.setProduct(order.getProduct());
+event.setAmount(bill.getAmount());
+event.setTax(bill.getTax());
+event.setTotalAmount(bill.getTotalAmount());
+
+notificationProducer.sendNotification(event);
+
+System.out.println("Notification event created successfully");
     }
 
     private void processPayment(Order order) {

@@ -4,6 +4,8 @@ PROJECT_DIR="$HOME/Desktop/sqs-local-demo"
 API_DIR="$PROJECT_DIR/order-api"
 WORKER_DIR="$PROJECT_DIR/order-worker"
 LOG_DIR="$PROJECT_DIR/logs"
+# NOTIFICATION_QUEUE_URL="http://localhost:4566/000000000000/notification-queue"
+NOTIFICATION_QUEUE_URL="http://sqs.ap-south-1.localhost.localstack.cloud:4566/000000000000/notification-queue"
 
 echo "=========================================="
 echo " Starting SQS Local Demo"
@@ -114,6 +116,15 @@ echo "http://localhost:8080"
 echo ""
 echo "SQS:"
 echo "$QUEUE_URL"
+
+aws --endpoint-url=http://localhost:4566 \
+    sqs create-queue \
+    --queue-name notification-queue \
+    --region ap-south-1 \
+    >/dev/null 2>&1 || true
+
+echo "Notification queue ready:"
+echo "$NOTIFICATION_QUEUE_URL"
 
 echo ""
 echo "Worker log:"
